@@ -1,0 +1,5 @@
+lns_config:
+  host: @TTN_SERVER@
+  port: 1883
+  appid: @TTN-APPID@
+  appkey: @TTN-APPKEY@

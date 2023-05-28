@@ -1,0 +1,15 @@
+[project]
+name = "cloudia_app"
+version = "0.0.1"
+
+dependencies = [
+	"asyncio-mqtt",
+	"pydantic",
+	"pyyaml"
+]
+
+[build-system]
+requires = [
+    "setuptools >= 67.8.0",
+    "setuptools_scm >= 7.1.0"
+]
