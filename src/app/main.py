@@ -7,7 +7,7 @@ import os
 import logging
 import ujson
 
-from .decoder import Decoder
+from .decoder import decode
 
 
 logger = logging.getLogger('cloudia-main')
@@ -50,8 +50,8 @@ async def main():
                 except Exception:
                     logger.exception("Invalid uplink received")
 
-                dec = Decoder(f_port, frm_payload)
-                dec.read_epochs()
+                dec = decode(f_port, frm_payload)
+                print(dec)
 
 if __name__ == '__main__':
     asyncio.run(main())
