@@ -57,7 +57,7 @@ async def main():
         logger.error("Argument parsing failed!")
         raise ex
 
-    reg = r"(?P<value>[0-9]+)(?P<units>[smh])"
+    reg = r"^(?P<value>[0-9]+)(?P<units>[smh]{1})$"
     rmatch = re.match(reg, args.period)
     if not rmatch:
         raise ValueError(f"Invalid option --period {args.period}")
