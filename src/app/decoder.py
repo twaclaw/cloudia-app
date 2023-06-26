@@ -7,19 +7,22 @@ from pydantic import BaseModel, Field
 CURRENT_VERSION = 0x01
 
 
+class VarName(Enum):
+    T = 'T'
+    H = 'H'
+
+
 class EncVarT(BaseModel):
-    name: Literal['T']
-    # number of bits of the first instance i=0
-    nbits_0: int = Field(10, const=True)
-    nbits_i: int = -1  # number of bits of instances i=1 ...
+    name: Literal[VarName.T]
+    nbits_v0: int = Field(10, const=True)  # no. bits var 0
+    nbits_vi: int = -1  # no. bits vars i=1...N
     signed: bool = Field(True, const=True)
 
 
 class EncVarH(BaseModel):
-    name: Literal['H']
-    # number of bits of the first instance i=0
-    nbits_0: int = Field(7, const=True)
-    nbits_i: int = -1  # number of bits of instance i=1 ...
+    name: Literal[VarName.H]
+    nbits_v0: int = Field(7, const=True)  # no. bits var 0
+    nbits_vi: int = -1  # no. bits vars 1=1...N
     signed: bool = Field(False, const=True)
 
 
@@ -28,14 +31,14 @@ class EncodedVar(BaseModel):
 
 
 class DecVarT(BaseModel):
-    name: Literal['T']
+    name: Literal[VarName.T]
     raw: int
     value: float | None = Field(None, ge=-100.0, le=100.0)
     multiplier: float = Field(0.1, const=True)
 
 
 class DecVarH(BaseModel):
-    name: Literal['H']
+    name: Literal[VarName.H]
     raw: int
     value: int | None = Field(None, ge=0, le=100)
     multiplier: float = Field(1, const=True)
@@ -46,7 +49,9 @@ class DecodedVar(BaseModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.var.value: float = self.var.raw * self.var.multiplier
+        value: float = self.var.raw * self.var.multiplier
+        super().__init__(**{**kwargs, **{'value': value}})
+        # TODO: validator for value not being executed
 
     def __add__(self, other) -> 'DecodedVar':
         return DecodedVar(var={'name': self.var.name, 'raw': self.var.raw + other.var.raw})
@@ -65,13 +70,17 @@ class Epoch(BaseModel):
     v: List[DecodedVar]
 
     def to_tuple(self):
-        return (self.t, {iv.var.name: iv.var.value for iv in self.v})
+        return (self.t, {iv.var.name.value: iv.var.value for iv in self.v})
 
 
 class BitDecompress():
     """
-    Decompress bit-squeezed values from a given buffer buf.
-    The information about the variables is given in var_conf
+    Decompress bit-squeezed values from a buffer of bytes.
+    This class implements an iterator that returns a set of variables (as defined by var_conf),
+    one epoch at the time,  until the buffer is empty
+
+    Arguments:
+    - var_conf: List describing the properties of the variables in each epoch
     """
 
     def __init__(self,
@@ -88,24 +97,24 @@ class BitDecompress():
         self.conf = var_conf
         self.now = now
         self.period = period
-        self.total_nbits_0 = 0
-        self.total_nbits_i = 0
+        self.total_nbits_v0 = 0
+        self.total_nbits_vi = 0
         self.use_diffs = use_diffs
         self.MASK: bytes = bytes(
             [0x01, 0x03, 0x07, 0x0F, 0x1F, 0x3F, 0x7F, 0xFF])
 
         for c in self.conf:
-            self.total_nbits_0 += c.var.nbits_0
-            self.total_nbits_i += (c.var.nbits_i if c.var.nbits_i > 0 else 0)
+            self.total_nbits_v0 += c.var.nbits_v0
+            self.total_nbits_vi += (c.var.nbits_vi if c.var.nbits_vi > 0 else 0)
 
         self.i = 0
 
     def _isEmpty(self) -> bool:
         remaining_nbits = (self.size - self.byte_ptr) * 8 - self.bit_ptr
         if self.i == 0:  # no element has been read
-            return self.total_nbits_0 > remaining_nbits
+            return self.total_nbits_v0 > remaining_nbits
         else:
-            return (self.total_nbits_i < 1) or (self.total_nbits_i > remaining_nbits)
+            return (self.total_nbits_vi < 1) or (self.total_nbits_vi > remaining_nbits)
 
     def __iter__(self):
         self.i = 0
@@ -121,8 +130,8 @@ class BitDecompress():
             raise StopIteration
         else:
             for c in self.conf:
-                v = self._read(c.var.nbits_0 if self.i ==
-                               0 else c.var.nbits_i, c.var.signed)
+                v = self._read(c.var.nbits_v0 if self.i ==
+                               0 else c.var.nbits_vi, c.var.signed)
                 dv = DecodedVar(var={'name': c.var.name, 'raw': v})
                 vars.append(dv)
                 t = self.now - self.i * self.period
@@ -168,9 +177,9 @@ class Decoder():
     offset: int = 0
     period: datetime.timedelta = datetime.timedelta(seconds=0)
     status: bytearray = bytearray([0, 0, 0, 0])
-    var_conf: Mapping[str, EncodedVar] = {
-        'T': EncodedVar(var={'name': 'T'}),
-        'H': EncodedVar(var={'name': 'H'})
+    var_conf: Mapping[VarName, EncodedVar] = {
+        VarName.T: EncodedVar(var={'name': VarName.T}),
+        VarName.H: EncodedVar(var={'name': VarName.H})
     }
 
     def __init__(self, port: int, payload_base64: str):
@@ -190,6 +199,7 @@ class Decoder():
                 f"Version: {self.version} not implemented")
 
         self.vbat = 2.5 + ((self.status[1] >> 2) & 0xF) / 10
+        print(f"Vbatt: {self.vbat}")
         # TODO: remove T and / or H from var_conf if TEN or HEN are not set
 
         if self.port == Ports.SINGLE_MEAS:
@@ -205,8 +215,8 @@ class Decoder():
             self.status[2] = self.payload[2]
             self.status[3] = self.payload[3]
             # number of bits used to encode the differences
-            self.var_conf['T'].var.nbits_i = (self.status[3] >> 5) & 0x7
-            self.var_conf['H'].var.nbits_i = (self.status[3] >> 2) & 0x7
+            self.var_conf[VarName.T].var.nbits_vi = (self.status[3] >> 5) & 0x7
+            self.var_conf[VarName.H].var.nbits_vi = (self.status[3] >> 2) & 0x7
             self.use_diffs = True
 
             data = self.payload[4:]
@@ -216,7 +226,7 @@ class Decoder():
         else:
             raise NotImplementedError(f"Port {port} not implemented")
 
-        period = self.status[3]
+        period = self.status[2]
         if period != 0:
             if period & (1 << 7):  # value in secs
                 self.period = datetime.timedelta(seconds=period & 0x7F)
@@ -226,6 +236,8 @@ class Decoder():
                 self.period = datetime.timedelta(hours=period & 0x3F)
         else:
             self.period = 0
+
+        print(f"PERIOD: {period} {self.period} {self.status[3]}")
 
         self.buffer = BitDecompress(data,
                                     list(self.var_conf.values()),
@@ -238,7 +250,6 @@ class Decoder():
         for v in self.buffer:
             res.append(v.to_tuple())
 
-        print(res)
         return res
 
 
