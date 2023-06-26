@@ -2,7 +2,7 @@ from base64 import b64decode
 from enum import Enum
 from typing import List, Literal, Mapping, Tuple
 import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 CURRENT_VERSION = 0x01
 
@@ -22,7 +22,7 @@ class EncVarT(BaseModel):
 class EncVarH(BaseModel):
     name: Literal[VarName.H]
     nbits_v0: int = Field(7, const=True)  # no. bits var 0
-    nbits_vi: int = -1  # no. bits vars 1=1...N
+    nbits_vi: int = -1  # no. bits vars i=1...N
     signed: bool = Field(False, const=True)
 
 
@@ -47,11 +47,9 @@ class DecVarH(BaseModel):
 class DecodedVar(BaseModel):
     var: DecVarT | DecVarH = Field(..., discriminator='name')
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        value: float = self.var.raw * self.var.multiplier
-        super().__init__(**{**kwargs, **{'value': value}})
-        # TODO: validator for value not being executed
+    @validator("value", always=True)
+    def computed_value(cls, _, values, **kwargs):
+        return values['raw'] * values['multiplier']
 
     def __add__(self, other) -> 'DecodedVar':
         return DecodedVar(var={'name': self.var.name, 'raw': self.var.raw + other.var.raw})
