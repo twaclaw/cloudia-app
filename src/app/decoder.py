@@ -1,74 +1,85 @@
 from base64 import b64decode
-from enum import Enum
-from typing import List, Literal, Mapping, Tuple
+from enum import IntEnum
+from dataclasses import dataclass
+import logging
+from typing import List, Mapping, Tuple
 import datetime
-from pydantic import BaseModel, Field, validator
 
 CURRENT_VERSION = 0x01
 
 
-class VarName(Enum):
-    T = 'T'
-    H = 'H'
+logger = logging.getLogger('cloudia-decoder')
 
 
-class EncVarT(BaseModel):
-    name: Literal[VarName.T]
-    nbits_v0: int = Field(10, const=True)  # no. bits var 0
-    nbits_vi: int = -1  # no. bits vars i=1...N
-    signed: bool = Field(True, const=True)
+class VarName(IntEnum):
+    T = 0
+    H = 1
 
 
-class EncVarH(BaseModel):
-    name: Literal[VarName.H]
-    nbits_v0: int = Field(7, const=True)  # no. bits var 0
-    nbits_vi: int = -1  # no. bits vars i=1...N
-    signed: bool = Field(False, const=True)
+@dataclass
+class VarConf():
+    nbits_v0: int
+    signed: bool
+    scale: float
+    limits: Tuple[float, float]
+    nbits_vi: int = -1
 
 
-class EncodedVar(BaseModel):
-    var: EncVarT | EncVarH = Field(..., discriminator='name')
+CONF: Mapping[VarName, VarConf] = {
+    VarName.T: VarConf(nbits_v0=10,
+                       signed=True,
+                       scale=0.1,
+                       limits=(-100.0, 100.0)),
+    VarName.H: VarConf(nbits_v0=7,
+                       signed=False,
+                       scale=1.0,
+                       limits=(0, 100))
+
+}
 
 
-class DecVarT(BaseModel):
-    name: Literal[VarName.T]
-    raw: int
-    value: float | None = Field(None, ge=-100.0, le=100.0)
-    multiplier: float = Field(0.1, const=True)
+class EncVar():
+    def __init__(self, name: VarName):
+        self.name = name
+        conf = CONF[name]
+        self.nbits_v0 = conf.nbits_v0
+        self.nbits_vi = conf.nbits_v0
+        self.signed = conf.signed
 
 
-class DecVarH(BaseModel):
-    name: Literal[VarName.H]
-    raw: int
-    value: int | None = Field(None, ge=0, le=100)
-    multiplier: float = Field(1, const=True)
+class DecVar():
+    def __init__(self, name: VarName, raw: int, validate: bool = False):
+        self.name = name
+        conf = CONF[name]
+        s = conf.scale
+        lim = conf.limits
+
+        self.raw = raw
+        self.value = raw * s
+        if validate:
+            if self.value < lim[0] or self.value > lim[1]:
+                logger.warning(
+                    f"Variable {name} value ({self.value}) out of range {lim}")
+
+    def __add__(self, other) -> 'DecVar':
+        return DecVar(self.name, self.raw + other.raw, validate=True)
 
 
-class DecodedVar(BaseModel):
-    var: DecVarT | DecVarH = Field(..., discriminator='name')
-
-    @validator("value", always=True)
-    def computed_value(cls, _, values, **kwargs):
-        return values['raw'] * values['multiplier']
-
-    def __add__(self, other) -> 'DecodedVar':
-        return DecodedVar(var={'name': self.var.name, 'raw': self.var.raw + other.var.raw})
-
-
-class Ports(Enum):
-    SINGLE_MEAS = 80
-    MULT_MEAS_OFFSET_0 = 81
-    MULT_MEAS = 82
+class Ports(IntEnum):
+    SINGLE_MEAS = 70
+    MULT_MEAS_OFFSET_0 = 80
+    MULT_MEAS = 81
     MULT_MEAS_OFFSET_0_DIFFS = 90
     MULT_MEAS_DIFFS = 91
 
 
-class Epoch(BaseModel):
+@dataclass
+class Epoch():
     t: datetime.datetime
-    v: List[DecodedVar]
+    v: List[DecVar]
 
     def to_tuple(self):
-        return (self.t, {iv.var.name.value: iv.var.value for iv in self.v})
+        return (self.t, {iv.name.value: iv.value for iv in self.v})
 
 
 class BitDecompress():
@@ -83,7 +94,7 @@ class BitDecompress():
 
     def __init__(self,
                  buf: bytes,
-                 var_conf: List[EncodedVar],
+                 var_conf: List[EncVar],
                  period: datetime.timedelta,
                  now: datetime.datetime = datetime.datetime.now(),
                  use_diffs: bool = False):
@@ -102,8 +113,8 @@ class BitDecompress():
             [0x01, 0x03, 0x07, 0x0F, 0x1F, 0x3F, 0x7F, 0xFF])
 
         for c in self.conf:
-            self.total_nbits_v0 += c.var.nbits_v0
-            self.total_nbits_vi += (c.var.nbits_vi if c.var.nbits_vi > 0 else 0)
+            self.total_nbits_v0 += c.nbits_v0
+            self.total_nbits_vi += (c.nbits_vi if c.nbits_vi > 0 else 0)
 
         self.i = 0
 
@@ -118,19 +129,19 @@ class BitDecompress():
         self.i = 0
         self.bit_ptr = 0
         self.byte_ptr = 0
-        self.prev_dec_vars = [DecodedVar(
-            var={'name': i.var.name, 'raw': 0}) for i in self.conf]
+        self.prev_dec_vars = [DecVar(i.name, 0) for i in self.conf]
         return self
 
     def __next__(self) -> Epoch:
-        vars: List[DecodedVar] = []
+        vars: List[DecVar] = []
         if self._isEmpty():
             raise StopIteration
         else:
             for c in self.conf:
-                v = self._read(c.var.nbits_v0 if self.i ==
-                               0 else c.var.nbits_vi, c.var.signed)
-                dv = DecodedVar(var={'name': c.var.name, 'raw': v})
+                signed = c.signed or (self.use_diffs and self.i > 0)
+                v = self._read(c.nbits_v0 if self.i ==
+                               0 else c.nbits_vi, signed)
+                dv = DecVar(c.name, v)
                 vars.append(dv)
                 t = self.now - self.i * self.period
 
@@ -144,7 +155,7 @@ class BitDecompress():
 
     def _read(self, nbits: int, signed: bool = False) -> int:
         """
-        Extracts a int variable from the buffer given its width
+        Extracts an int variable from the buffer given its width
         """
         sign = 0
         if signed:
@@ -175,14 +186,13 @@ class Decoder():
     offset: int = 0
     period: datetime.timedelta = datetime.timedelta(seconds=0)
     status: bytearray = bytearray([0, 0, 0, 0])
-    var_conf: Mapping[VarName, EncodedVar] = {
-        VarName.T: EncodedVar(var={'name': VarName.T}),
-        VarName.H: EncodedVar(var={'name': VarName.H})
+    var_conf: Mapping[VarName, EncVar] = {
+        i: EncVar(i) for i in VarName
     }
 
     def __init__(self, port: int, payload_base64: str):
         self.payload = b64decode(payload_base64)
-        self.port = Ports(port)
+        self.port = port
         self.use_diffs: bool = False
         print(self.port, self.payload)
 
@@ -213,8 +223,8 @@ class Decoder():
             self.status[2] = self.payload[2]
             self.status[3] = self.payload[3]
             # number of bits used to encode the differences
-            self.var_conf[VarName.T].var.nbits_vi = (self.status[3] >> 5) & 0x7
-            self.var_conf[VarName.H].var.nbits_vi = (self.status[3] >> 2) & 0x7
+            self.var_conf[VarName.T].nbits_vi = (self.status[3] >> 5) & 0x7
+            self.var_conf[VarName.H].nbits_vi = (self.status[3] >> 2) & 0x7
             self.use_diffs = True
 
             data = self.payload[4:]
@@ -246,6 +256,7 @@ class Decoder():
         res: List[Tuple] = []
 
         for v in self.buffer:
+            # print(v.to_tuple())
             res.append(v.to_tuple())
 
         return res

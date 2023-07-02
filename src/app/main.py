@@ -47,11 +47,10 @@ async def main():
                     # deveui = payload['end_device_ids']['dev_eui']
                     uplink = payload['uplink_message']
                     f_port, frm_payload = uplink['f_port'], uplink['frm_payload']
+                    dec = decode(f_port, frm_payload)
+                    print(dec)
                 except Exception:
                     logger.exception("Invalid uplink received")
-
-                dec = decode(f_port, frm_payload)
-                print(dec)
 
 if __name__ == '__main__':
     asyncio.run(main())
