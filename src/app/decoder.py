@@ -123,7 +123,7 @@ class BitDecompress():
         if self.i == 0:  # no element has been read
             return self.total_nbits_v0 > remaining_nbits
         else:
-            return (self.total_nbits_vi < 1) or (self.total_nbits_vi > remaining_nbits)
+            return (self.total_nbits_vi < 1) or (self.total_nbits_vi >= remaining_nbits)
 
     def __iter__(self):
         self.i = 0
@@ -139,8 +139,8 @@ class BitDecompress():
         else:
             for c in self.conf:
                 signed = c.signed or (self.use_diffs and self.i > 0)
-                v = self._read(c.nbits_v0 if self.i ==
-                               0 else c.nbits_vi, signed)
+                nbits = c.nbits_v0 if self.i == 0 else c.nbits_vi
+                v = self._read(nbits, signed)
                 dv = DecVar(c.name, v)
                 vars.append(dv)
                 t = self.now - self.i * self.period
@@ -167,7 +167,9 @@ class BitDecompress():
                 self.byte_ptr += 1
         res = 0
         shift_by = 0
-        while nbits:
+        lbuf = len(self.buf)
+        while nbits and self.byte_ptr < lbuf:
+            # print(nbits, len(self.buf), self.byte_ptr)
             x = self.buf[self.byte_ptr]
             x >>= self.bit_ptr
             masked_bits = min(8 - self.bit_ptr, nbits)
@@ -194,7 +196,6 @@ class Decoder():
         self.payload = b64decode(payload_base64)
         self.port = port
         self.use_diffs: bool = False
-        print(self.port, self.payload)
 
         self.status[0] = self.payload[0]
         self.status[1] = self.payload[1]
@@ -207,7 +208,7 @@ class Decoder():
                 f"Version: {self.version} not implemented")
 
         self.vbat = 2.5 + ((self.status[1] >> 2) & 0xF) / 10
-        print(f"Vbatt: {self.vbat}")
+        logger.debug(f"Vbatt: {self.vbat}")
         # TODO: remove T and / or H from var_conf if TEN or HEN are not set
 
         if self.port == Ports.SINGLE_MEAS:
@@ -234,18 +235,19 @@ class Decoder():
         else:
             raise NotImplementedError(f"Port {port} not implemented")
 
-        period = self.status[2]
-        if period != 0:
-            if period & (1 << 7):  # value in secs
-                self.period = datetime.timedelta(seconds=period & 0x7F)
-            elif self.status[3] & (1 << 6):  # value in mins
-                self.period = datetime.timedelta(minutes=period & 0x3F)
+        if self.port != Ports.SINGLE_MEAS:
+            period = self.status[2]
+            if period != 0:
+                if period & (1 << 7):  # value in secs
+                    self.period = datetime.timedelta(seconds=period & 0x7F)
+                elif self.status[3] & (1 << 6):  # value in mins
+                    self.period = datetime.timedelta(minutes=period & 0x3F)
+                else:
+                    self.period = datetime.timedelta(hours=period & 0x3F)
             else:
-                self.period = datetime.timedelta(hours=period & 0x3F)
-        else:
-            self.period = 0
+                self.period = 0
 
-        print(f"PERIOD: {period} {self.period} {self.status[3]}")
+            logger.debug(f"PERIOD: {period} {self.period} {self.status[3]}")
 
         self.buffer = BitDecompress(data,
                                     list(self.var_conf.values()),

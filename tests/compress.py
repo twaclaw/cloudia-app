@@ -50,4 +50,6 @@ class Compress():
         self.add(abs(x), nbits)
 
     def array(self) -> bytes:
-        return bytes(self.buf[:self.byte_ptr + 1 if self.bit_ptr > 0 else 0])
+        up: int = self.byte_ptr
+        up += 1 if self.bit_ptr > 0 else 0
+        return bytes(self.buf[:up])
