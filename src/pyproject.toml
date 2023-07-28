@@ -3,10 +3,12 @@ name = "cloudia_app"
 version = "0.0.1"
 
 dependencies = [
-	"asyncio-mqtt",
+	"aiohttp",
+	"aiomqtt",
 	"pydantic",
 	"pyyaml",
-	"ujson"
+	"ujson",
+	"influxdb-client"
 ]
 
 [build-system]
@@ -14,3 +16,6 @@ requires = [
     "setuptools >= 67.8.0",
     "setuptools_scm >= 7.1.0"
 ]
+
+[project.scripts]
+mqtt-app = "app:main"

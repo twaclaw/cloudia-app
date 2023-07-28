@@ -1,16 +1,22 @@
 import asyncio
-import asyncio_mqtt as aiomqtt
+import aiomqtt
 import argparse
-import yaml
-from pathlib import Path
-import os
+from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
+from influxdb_client import Point
 import logging
+import os
+from pathlib import Path
 import ujson
+from sys import stdout
+from typing import List
+import yaml
 
-from .decoder import decode
+from .decoder import decode, VarName
 
 
 logger = logging.getLogger('cloudia-main')
+consoleHandler = logging.StreamHandler(stdout)
+logger.addHandler(consoleHandler)
 
 
 async def main():
@@ -33,6 +39,9 @@ async def main():
     lns_config = config['lns']
     topics = f"v3/{lns_config['appid']}/devices/+/up"
 
+    db_cfg = config['influxdb']
+    bucket, org = db_cfg['bucket'], db_cfg['org']
+
     async with aiomqtt.Client(
             hostname=lns_config['host'],
             port=lns_config['port'],
@@ -44,13 +53,27 @@ async def main():
             async for message in messages:
                 try:
                     payload = ujson.loads(message.payload.decode())
-                    # deveui = payload['end_device_ids']['dev_eui']
+                    deveui = payload['end_device_ids']['dev_eui']
                     uplink = payload['uplink_message']
                     f_port, frm_payload = uplink['f_port'], uplink['frm_payload']
                     dec = decode(f_port, frm_payload)
-                    print(dec)
+                    points: List[Point] = []
+                    for t, v in dec:
+                        T, H = v[VarName.T], v[VarName.H]
+                        points.append(Point("TH")
+                                      .tag("deveui", deveui)
+                                      .field("T", T)
+                                      .field("H", H)
+                                      .time(t))
+
+                    async with InfluxDBClientAsync(url=db_cfg['url'],
+                                                   token=db_cfg['token'],
+                                                   timeout=db_cfg['timeout'],
+                                                   verify_ssl=db_cfg['verify_ssl']) as client:
+                        write_api = client.write_api()
+                        await write_api.write(bucket, org, points)
                 except Exception:
-                    logger.exception("Invalid uplink received")
+                    logger.exception(f"Invalid uplink received {uplink}")
 
 if __name__ == '__main__':
     asyncio.run(main())

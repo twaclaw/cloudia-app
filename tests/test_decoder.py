@@ -21,6 +21,7 @@ class Vector:
 
 test_cases: List[Vector] = [
     Vector(N=1, limits={VarName.T: (200, 300), VarName.H: (50, 60)}),
+    Vector(N=5, limits={VarName.T: (200, 210), VarName.H: (50, 60)}),
     Vector(N=10, limits={VarName.T: (200, 210), VarName.H: (40, 50)}),
     Vector(N=30, limits={VarName.T: (200, 300), VarName.H: (40, 99)}),
     Vector(N=100, limits={VarName.T: (200, 250), VarName.H: (60, 99)}),
@@ -123,6 +124,21 @@ class TestDecoder:
             for v in VarName:
                 assert np.allclose(data_read[v], tv.data[v])
 
+    def test_edge_cases(self):
+        b, port = "AHeUINLp7QI=", 90
+        print(b, port)
+        d = decode(port, b)
+        data_read: Mapping[VarName, np.ndarray] = {
+            v: np.array([]) for v in VarName}
+        for i in d:
+            dr = i[1]
+            for v in VarName:
+                scale = 1 / CONF[v].scale
+                data_read[v] = np.append(data_read[v], int(dr[v]*scale))
+
+        for v in VarName:
+            assert np.allclose(data_read[v], tv.data[v])
+
     def test_all(self):
-        self.run_test(use_diffs=False)
+        # self.run_test(use_diffs=False)
         self.run_test(use_diffs=True)

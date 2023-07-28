@@ -96,7 +96,7 @@ class BitDecompress():
                  buf: bytes,
                  var_conf: List[EncVar],
                  period: datetime.timedelta,
-                 now: datetime.datetime = datetime.datetime.now(),
+                 now: datetime.datetime = datetime.datetime.utcnow(),
                  use_diffs: bool = False):
 
         self.buf: bytes = buf
