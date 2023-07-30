@@ -1,5 +1,5 @@
 import asyncio
-import asyncio_mqtt as aiomqtt
+import aiomqtt
 import argparse
 import yaml
 from pathlib import Path
@@ -77,6 +77,9 @@ async def main():
 
     v_d = rmatch.groupdict()
     units, value = TimeUnit(v_d['units']), int(v_d['value'])
+    if value > 255:
+        raise ValueError(f"Period value ({value}, {units}) should be < 255")
+
     downlink = {
         "downlinks": [{
             "f_port": 144,

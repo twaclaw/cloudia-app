@@ -140,7 +140,10 @@ class BitDecompress():
             for c in self.conf:
                 signed = c.signed or (self.use_diffs and self.i > 0)
                 nbits = c.nbits_v0 if self.i == 0 else c.nbits_vi
-                v = self._read(nbits, signed)
+                if nbits == 0:
+                    v = 0
+                else:
+                    v = self._read(nbits, signed)
                 dv = DecVar(c.name, v)
                 vars.append(dv)
                 t = self.now - self.i * self.period

@@ -126,7 +126,8 @@ class TestDecoder:
 
     def test_edge_cases(self):
         b, port = "AHeUINLp7QI=", 90
-        print(b, port)
+        ref = {VarName.T: np.array([233., 232., 233., 232., 233., 233., 233., 233.]),
+               VarName.H: np.array([61., 61., 61., 61., 61., 61., 61., 61.])}
         d = decode(port, b)
         data_read: Mapping[VarName, np.ndarray] = {
             v: np.array([]) for v in VarName}
@@ -134,10 +135,10 @@ class TestDecoder:
             dr = i[1]
             for v in VarName:
                 scale = 1 / CONF[v].scale
-                data_read[v] = np.append(data_read[v], int(dr[v]*scale))
+                data_read[v] = np.append(data_read[v], int(dr[v] * scale))
 
         for v in VarName:
-            assert np.allclose(data_read[v], tv.data[v])
+            assert np.allclose(data_read[v], ref[v])
 
     def test_all(self):
         # self.run_test(use_diffs=False)
