@@ -17,6 +17,7 @@ from .decoder import decode, VarName
 logger = logging.getLogger('cloudia-main')
 consoleHandler = logging.StreamHandler(stdout)
 logger.addHandler(consoleHandler)
+logger.setLevel(logging.DEBUG)
 
 
 async def main():
@@ -42,6 +43,8 @@ async def main():
     db_cfg = config['influxdb']
     bucket, org = db_cfg['bucket'], db_cfg['org']
 
+    logger.debug("Starting main loop ...")
+
     async with aiomqtt.Client(
             hostname=lns_config['host'],
             port=lns_config['port'],
@@ -55,11 +58,13 @@ async def main():
                     payload = ujson.loads(message.payload.decode())
                     deveui = payload['end_device_ids']['dev_eui']
                     uplink = payload['uplink_message']
+                    logger.debug(f"Received uplink: {uplink}")
                     f_port, frm_payload = uplink['f_port'], uplink['frm_payload']
                     dec = decode(f_port, frm_payload)
                     points: List[Point] = []
                     for t, v in dec:
                         T, H = v[VarName.T], v[VarName.H]
+                        logger.debug(f"t: {t}, values: ({T}, {H})")
                         points.append(Point("TH")
                                       .tag("deveui", deveui)
                                       .field("T", T)

@@ -4,11 +4,15 @@ from dataclasses import dataclass
 import logging
 from typing import List, Mapping, Tuple
 import datetime
+from sys import stdout
 
 CURRENT_VERSION = 0x01
 
 
 logger = logging.getLogger('cloudia-decoder')
+consoleHandler = logging.StreamHandler(stdout)
+logger.addHandler(consoleHandler)
+logger.setLevel(logging.DEBUG)
 
 
 class VarName(IntEnum):
@@ -96,7 +100,7 @@ class BitDecompress():
                  buf: bytes,
                  var_conf: List[EncVar],
                  period: datetime.timedelta,
-                 now: datetime.datetime = datetime.datetime.utcnow(),
+                 now: datetime.datetime,
                  use_diffs: bool = False):
 
         self.buf: bytes = buf
@@ -243,7 +247,7 @@ class Decoder():
             if period != 0:
                 if period & (1 << 7):  # value in secs
                     self.period = datetime.timedelta(seconds=period & 0x7F)
-                elif self.status[3] & (1 << 6):  # value in mins
+                elif period & (1 << 6):  # value in mins
                     self.period = datetime.timedelta(minutes=period & 0x3F)
                 else:
                     self.period = datetime.timedelta(hours=period & 0x3F)
@@ -255,6 +259,7 @@ class Decoder():
         self.buffer = BitDecompress(data,
                                     list(self.var_conf.values()),
                                     self.period,
+                                    now=datetime.datetime.utcnow(),
                                     use_diffs=self.use_diffs)
 
     def read_epochs(self) -> List[Tuple]:
