@@ -1,0 +1,20 @@
+services:
+  influxdb:
+    image: influxdb:latest
+    container_name: influxdb2
+    restart: always
+    env_file:
+      - influxdb-envs
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./data:/var/lib/influxdb2
+      - ./config:/etc/influxdb2
+  mqtt-client:
+    container_name: mqtt-app
+    restart: always
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    ports:
+      - "1883:1883"
